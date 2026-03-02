@@ -8,7 +8,7 @@ from podgen import Podcast, Episode, Media
 # --- CONFIG ---
 FOLDER_ID = os.environ.get('FOLDER_ID')
 GITHUB_TOKEN = os.environ.get('GITHUB_TOKEN')
-REPO_NAME = "your-username/your-repo"
+REPO_NAME = "yemman/podcast-automator"
 FILE_PATH = "feed.xml" # The path in your repo
 
 def drive_to_spotify(event, context):
@@ -21,8 +21,8 @@ def drive_to_spotify(event, context):
     files = results.get('files', [])
 
     # 2. Generate RSS Feed
-    p = Podcast(name="My GCP Podcast", description="Auto-synced from Drive", 
-                website="https://github.com/your-username", explicit=False)
+    p = Podcast(name="The Power Of Silance Podcast", description="Auto-synced from Drive", 
+                website="https://github.com/yemman", explicit=False)
     
     for f in files:
         download_url = f"https://drive.google.com/uc?export=download&id={f['id']}"
