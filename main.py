@@ -11,7 +11,7 @@ GITHUB_TOKEN = os.environ.get('GITHUB_TOKEN')
 REPO_NAME = "yemman/podcast-automator"
 FILE_PATH = "feed.xml" # The path in your repo
 
-def drive_to_spotify(event, context):
+def drive_to_spotify(event):
     # 1. Auth with Google Drive (using Function's Identity)
     # Ensure the Function Service Account has 'Viewer' access to your Drive Folder
     drive_service = build('drive', 'v3')
