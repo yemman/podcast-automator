@@ -39,7 +39,9 @@ class PodcastAutomator:
         )
         
         for f in files:
-            download_url = f"https://drive.google.com/uc?export=download&id={f['id']}"
+            # We append &ext=.mp3 to satisfy podgen's validation
+            download_url = f"https://drive.google.com/uc?export=download&id={f['id']}&ext=.m4a"
+            
             e = p.add_episode()
             e.title = f['name']
             e.media = Media(download_url, size=int(f.get('size', 0)))
