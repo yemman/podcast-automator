@@ -55,11 +55,11 @@ class PodcastAutomator:
     def move_to_processed(self, file_id):
         """Moves a file from Source to Processed folder after successful sync."""
         service = self.get_drive_service()
-        file = service.files().get(file_id=file_id, fields='parents').execute()
+        file = service.files().get(fileId=file_id, fields='parents').execute()
         previous_parents = ",".join(file.get('parents'))
 
         service.files().update(
-            file_id=file_id,
+            fileId=file_id,
             addParents=self.processed_folder,
             removeParents=previous_parents,
             fields='id, parents'
