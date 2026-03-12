@@ -95,16 +95,23 @@ class PodcastAutomator:
     def create_item(self, f):
         """Constructs a new <item> element with full metadata."""
         item = etree.Element("item")
-        
+
+        # Extract the extension from the filename (e.g., 'lesson.m4a' -> '.m4a')
+        # If no extension is found, default to .mp3
+        full_file_name = f.get('name', '')
+        file_name, extension = os.path.splitext(full_file_name)
+        if not extension:
+            extension = ".mp3"
+            
         # Title & Description (CDATA for Hebrew support)
         title = etree.SubElement(item, "title")
-        title.text = etree.CDATA(f['name'])
+        title.text = etree.CDATA(file_name)
         
         desc = etree.SubElement(item, "description")
         desc.text = etree.CDATA(f"שיעור שהועלה בתאריך {f['createdTime']}")
         
         # Enclosure (The Direct Download URL)
-        url = f"https://drive.google.com/uc?export=download&id={f['id']}&ext=.mp3"
+        url = f"https://drive.google.com/uc?export=download&id={f['id']}&ext={extension}"
         etree.SubElement(item, "enclosure", 
                          url=url, 
                          length=str(f.get('size', 0)), 
