@@ -1,4 +1,4 @@
-# Web Framework for GCP
+# GCP Runtime & Web Framework
 functions-framework==3.*
 
 # Google Drive & Authentication
@@ -6,8 +6,8 @@ google-api-python-client>=2.0.0
 google-auth>=2.0.0
 google-auth-httplib2>=0.1.0
 
-# Podcast RSS Generation
-podgen>=1.1.0
+# Advanced XML Processing (Maintains Anchor.fm/iTunes standards)
+lxml>=5.0.0
 
 # GitHub API Communication
 requests>=2.25.0
