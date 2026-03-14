@@ -133,7 +133,7 @@ class PodcastAutomator:
             extension = ".mp3"
         
         # SET DYNAMIC DESCRIPTION USING AI
-        ai_desc = self.get_ai_description(f['id'], name_clean)
+        ai_desc = self.get_ai_description(f['id'], file_name)
         
         # Title & Description (CDATA for Hebrew support)
         title = etree.SubElement(item, "title")
