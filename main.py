@@ -6,6 +6,7 @@ import google.auth
 from datetime import datetime
 from lxml import etree
 from googleapiclient.discovery import build
+import google.generativeai as genai
 
 # --- LOGGING CONFIGURATION ---
 # Formatted for GCP Cloud Logging
@@ -21,9 +22,14 @@ class PodcastAutomator:
         self.source_folder = os.environ.get('FOLDER_ID')
         self.processed_folder = os.environ.get('PROCESSED_FOLDER_ID')
         self.github_token = os.environ.get('GITHUB_TOKEN')
+        # self.prompt = os.environ.get('PROMPT')
         self.repo_name = "yemman/podcast-automator"
         self.file_path = "feed.xml"
         self.gh_api_url = f"https://api.github.com/repos/{self.repo_name}/contents/{self.file_path}"
+        self.model = genai.GenerativeModel('gemini-1.5-flash')
+        
+        genai.configure(api_key=os.environ.get("GEMINI_API_KEY"))
+        
         
         # Anchor.fm & iTunes standard namespaces
         self.nsmap = {
@@ -91,6 +97,29 @@ class PodcastAutomator:
             return f"{minutes:02}:{seconds:02}"
         except (TypeError, ValueError):
             return "00:00"
+            
+    def get_ai_description(self, file_id, file_name):
+        """Downloads audio and asks Gemini to summarize it."""
+        try:
+            logger.info(f"Generating AI description for {file_name}...")
+            service = self.get_drive_service()
+            
+            # 1. Download audio to memory
+            request = service.files().get_media(fileId=file_id)
+            audio_data = request.execute()
+
+            # 2. Call Gemini
+            prompt = f"זהו שיעור תורה בעניין שמירת הלשון בשם '{file_name}'. הקשב לאודיו וסכם את עיקרי הדברים ב-2-3 משפטים עבור תיאור הפודקאסט."
+            
+            response = self.model.generate_content([
+                prompt,
+                {"mime_type": "audio/mpeg", "data": audio_data}
+            ])
+            
+            return response.text.strip()
+        except Exception as e:
+            logger.warning(f"AI summary failed for {file_name}: {e}")
+            return f"שיעור בנושא {file_name}" # Fallback
 
     def create_item(self, f):
         """Constructs a new <item> element with full metadata."""
@@ -102,13 +131,16 @@ class PodcastAutomator:
         file_name, extension = os.path.splitext(full_file_name)
         if not extension:
             extension = ".mp3"
-            
+        
+        # SET DYNAMIC DESCRIPTION USING AI
+        ai_desc = self.get_ai_description(f['id'], name_clean)
+        
         # Title & Description (CDATA for Hebrew support)
         title = etree.SubElement(item, "title")
         title.text = etree.CDATA(file_name)
         
         desc = etree.SubElement(item, "description")
-        desc.text = etree.CDATA(f"שיעור שהועלה בתאריך {f['createdTime']}")
+        desc.text = etree.CDATA(ai_desc) # The AI summary
         
         # Enclosure (The Direct Download URL)
         url = f"https://drive.google.com/uc?export=download&id={f['id']}&ext={extension}"
