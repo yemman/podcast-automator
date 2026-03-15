@@ -26,10 +26,13 @@ class PodcastAutomator:
         self.repo_name = "yemman/podcast-automator"
         self.file_path = "feed.xml"
         self.gh_api_url = f"https://api.github.com/repos/{self.repo_name}/contents/{self.file_path}"
-        self.model = genai.GenerativeModel('gemini-1.5-flash')
+        self.model = genai.GenerativeModel('gemini-2.5-flash')
         
         genai.configure(api_key=os.environ.get("GEMINI_API_KEY"))
-        
+        # TODO: delete for prod
+        for m in genai.list_models():
+            if 'generateContent' in m.supported_generation_methods:
+                print(m.name)
         
         # Anchor.fm & iTunes standard namespaces
         self.nsmap = {
