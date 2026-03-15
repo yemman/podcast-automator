@@ -119,7 +119,8 @@ class PodcastAutomator:
             return response.text.strip()
         except Exception as e:
             logger.warning(f"AI summary failed for {file_name}: {e}")
-            return f"שיעור בנושא {file_name}" # Fallback
+            raise Exception("Could not retrieve ai_description.")
+            #return f"שיעור בנושא {file_name}" # Fallback
 
     def create_item(self, f):
         """Constructs a new <item> element with full metadata."""
