@@ -1,32 +1,82 @@
-# 🎙️ My Automated Podcast Feed
+# Podcast-to-Spotify Automator: A Serverless Data Pipeline
 
-This repository hosts the live RSS feed for my podcast, which is automatically synchronized from a Google Drive folder using Google Cloud Platform (GCP).
-
-## 🚀 How it Works
-
-1.  **Storage:** Audio files are uploaded to a specific folder in **Google Drive**.
-2.  **Automation:** A **Google Cloud Function** runs on a daily schedule (via Cloud Scheduler).
-3.  **Processing:** The script scans the Drive folder, generates a compliant Podcast RSS 2.0 XML file, and pushes it to this repository.
-4.  **Distribution:** This GitHub repository serves the `feed.xml` file, which is consumed by **Spotify for Podcasters**.
-
-## 🔗 The Feed URL
-If you are setting this up in Spotify, use the "Raw" link to the feed:
-`https://raw.githubusercontent.com/YOUR_USERNAME/YOUR_REPO_NAME/main/feed.xml`
-
-## 🛠️ Tech Stack
-* **Source:** Google Drive API
-* **Logic:** Python 3.10 (running on GCP Cloud Functions)
-* **Hosting:** GitHub Pages / GitHub Actions
-* **RSS Standard:** Podcast RSS 2.0 (via `podgen`)
-
-## 📁 Repository Structure
-* `feed.xml`: The auto-generated RSS feed (do not edit manually).
-* `README.md`: Project documentation.
-
-## ⚠️ Maintenance Notes
-* **File Formats:** Only `.mp3`, `.m4a`, or `.wav` files in the Drive folder will be included.
-* **Permissions:** Ensure the Drive folder is shared with the GCP Service Account email and set to "Anyone with the link can view."
-* **Sync Time:** The feed updates once every 24 hours at midnight UTC.
+This project is a cloud-native, automated data pipeline designed to synchronize audio recordings from Google Drive to a Spotify-compatible RSS feed hosted on GitHub. It is built with a focus on **Data Engineering best practices**, utilizing modern serverless architecture and Generative AI for metadata enrichment.
 
 ---
-*Last updated: 01/03/2026*
+
+## 🏗️ Architecture & Data Engineering Logic
+
+As a pipeline built by a Senior Data Engineer, this project moves beyond simple "scripting" by implementing a robust **Data Lifecycle Management** strategy:
+
+### 1. The "Medallion" Logic (Bronze to Silver)
+
+The pipeline treats Google Drive as a data lake with a structured workflow:
+
+* **Landing Zone (Bronze):** New raw audio files (`.mp3`, `.m4a`, `.wav`) are dropped into a "Source" folder.
+* **Processing:** The system extracts duration metadata, generates AI-driven summaries, and updates the GitHub-hosted XML.
+* **Archive (Silver):** Once successfully committed to the feed, files are moved to a "Processed" folder to ensure **Idempotency** (no duplicate processing).
+
+### 2. Generative AI Enrichment
+
+Leveraging **Gemini 1.5 Flash**, the pipeline "listens" to each audio file to generate a 2-3 sentence Hebrew description. This transforms a simple file sync into an intelligent content management system.
+
+### 3. Observability & Cost Monitoring
+
+* **Log-Level Metrics:** Detailed logging tracks duration, file sizes, and successful GitHub commits.
+* **Unit Economics:** The code includes an integrated cost calculator that logs the estimated USD cost of each AI inference run ($0.00002/sec) to GCP Cloud Logging.
+
+---
+
+## 🛠️ Tech Stack
+
+* **Runtime:** Python 3.14 (utilizing the experimental JIT for performance).
+* **Environment:** Dockerized (slim image) deployed on **Google Cloud Run**.
+* **Secrets:** Secure cross-project access via **GCP Secret Manager**.
+* **API Integrations:** * **Google Drive API v3** (Metadata & File Management).
+* **Vertex AI / Gemini API** (Audio Summarization).
+* **GitHub REST API** (Automated XML commits).
+
+
+* **XML Engine:** `lxml` for maintaining strict RSS/iTunes/Anchor.fm namespaces and Hebrew CDATA integrity.
+
+---
+
+## 🚀 Key Features
+
+* **Dynamic Extension Handling:** Automatically detects audio containers (m4a/mp3) and sets correct `enclosure` mime-types.
+* **Serverless Scalability:** Scales to zero when not in use, triggered by a Cloud Scheduler (Cron) or Webhook.
+* **Hebrew Language Support:** Fully optimized for RTL content and Hebrew character encoding in RSS readers.
+* **Security First:** Uses Application Default Credentials (ADC) and IAM roles instead of hardcoded keys.
+
+---
+
+## 🔧 Infrastructure Setup
+
+### Environment Variables
+
+| Key | Description |
+| --- | --- |
+| `FOLDER_ID` | Landing folder for new recordings. |
+| `PROCESSED_FOLDER_ID` | Archive folder for successfully synced files. |
+| `GEMINI_API_KEY` | Vertex AI / Google AI Studio key. |
+| `GITHUB_TOKEN` | Personal Access Token with repo scope. |
+
+### Deployment
+
+The project is deployed via a Docker container to ensure environment parity between local development and GCP.
+
+```bash
+docker build -t podcast-automator .
+gcloud run deploy podcast-service --image gcr.io/[PROJECT_ID]/podcast-automator
+
+```
+
+---
+
+## 👨‍💻 Author
+
+**Yannay** *Senior Data Engineer*
+
+---
+
+**Would you like me to add a "Troubleshooting" section specifically for common GCP IAM permission errors?**
