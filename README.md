@@ -79,4 +79,63 @@ gcloud run deploy podcast-service --image gcr.io/[PROJECT_ID]/podcast-automator
 
 ---
 
-**Would you like me to add a "Troubleshooting" section specifically for common GCP IAM permission errors?**
+## ⚠️ Troubleshooting: IAM & Permissions
+
+In a cross-project serverless environment, 90% of deployment failures are identity-related. Below are the most common friction points for this pipeline and how to resolve them.
+
+---
+
+### 1. Error: `403 Forbidden` on Google Drive
+
+**Symptom:** The script can see the files but fails when trying to move them to the `PROCESSED_FOLDER_ID`.
+
+* **The Cause:** Moving a file in Drive requires the `files.update` permission, which is part of the **Editor** role.
+* **The Fix:** Ensure the Service Account running your Cloud Run/Function has the **Editor** role (or a custom role with `https://www.googleapis.com/auth/drive`) on **both** the Source and Processed folders.
+* *Note:* Sharing the folder with the Service Account's email address in the Google Drive UI is often the fastest way to grant this.
+
+
+
+### 2. Error: `Secret Manager` Access Denied
+
+**Symptom:** `google.api_core.exceptions.PermissionDenied: 403 Permission 'secretmanager.versions.access' denied`.
+
+* **The Cause:** This usually happens when the secret is in a different project and the "bridge" hasn't been built.
+* **The Fix:** 1.  Get the **Service Account email** from the "Podcast" project.
+2.  Go to the **Secret Manager** in the "Security" project.
+3.  Select the specific secret -> **Permissions** -> **Add Principal**.
+4.  Assign the role: `roles/secretmanager.secretAccessor`.
+
+### 3. Error: `Default Credentials` Not Found
+
+**Symptom:** `google.auth.exceptions.DefaultCredentialsError`.
+
+* **The Cause:** This typically happens during **local development** when the environment doesn't have access to your GCP identity.
+* **The Fix:** Run the following command on your local machine to re-authenticate:
+```bash
+gcloud auth application-default login
+
+```
+
+
+This creates a local JSON file that the `google-auth` library will automatically detect.
+
+### 4. Error: Gemini API `Quota Exceeded` or `API Not Enabled`
+
+**Symptom:** `429 Too Many Requests` or `403 Generative Language API has not been used...`.
+
+* **The Cause:** The `Generative Language API` must be enabled in the project **associated with the API Key or Service Account** you are using.
+* **The Fix:**
+1. Go to the [GCP Console API Library](https://console.cloud.google.com/apis/library).
+2. Search for **Generative Language API**.
+3. Ensure it is **Enabled** in the billing project.
+
+
+
+---
+
+### 🛡️ Best Practice: The "Principle of Least Privilege"
+
+Instead of granting `roles/owner` or `roles/editor` at the project level, always bind roles to the specific resource:
+
+* Grant `Secret Accessor` on the **Secret** itself.
+* Grant `Drive Editor` on the **Folder** itself.
