@@ -24,7 +24,7 @@ class PodcastAutomator:
         self.github_token = os.environ.get('GITHUB_TOKEN')
         self.gemini_model = os.environ.get('GEMINI_MODEL')
         self.repo_name = os.environ.get('REPO_NAME')
-        self.repo_name = os.environ.get('FILE_PATH')
+        self.file_path = os.environ.get('FILE_PATH')
         self.prompt = os.environ.get('PROMPT')
         
         self.gh_api_url = f"https://api.github.com/repos/{self.repo_name}/contents/{self.file_path}"
