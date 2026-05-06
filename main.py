@@ -52,7 +52,7 @@ class PodcastAutomator:
         service = self.get_drive_service()
         
         query = f"'{self.source_folder}' in parents and mimeType contains 'audio/'"
-        fields = "files(id, name, createdTime, size, mimeType, videoMediaMetadata)"
+        fields = "files(id, name, createdTime, size, mimeType, videoMediaMetadata, md5Checksum)"
         
         results = service.files().list(q=query, fields=fields).execute()
         files = results.get('files', [])
@@ -74,8 +74,8 @@ class PodcastAutomator:
         logger.info(f"Archived file ID {file_id} to folder {self.processed_folder}")
 
     def fetch_current_feed(self):
-        """Downloads existing feed.xml from GitHub."""
-        logger.info("Fetching current feed.xml from GitHub...")
+        """Downloads existing feed file from GitHub."""
+        logger.info("Fetching current feed file from GitHub...")
         headers = {"Authorization": f"token {self.github_token}"}
         resp = requests.get(self.gh_api_url, headers=headers)
         
@@ -152,12 +152,18 @@ class PodcastAutomator:
                          type=f.get('mimeType', 'audio/mpeg'))
         
         # Basic Metadata
-        etree.SubElement(item, "guid", isPermaLink="false").text = f['id']
+        guid_text = f"{f['id']}_{f.get('md5Checksum', 'no-md5')}"
+        etree.SubElement(item, "guid", isPermaLink="false").text = guid_text
         etree.SubElement(item, "pubDate").text = f['createdTime']
         
         # iTunes Metadata
         etree.SubElement(item, "{%s}explicit" % self.nsmap['itunes']).text = "false"
         
+        category = etree.SubElement(item, "{%s}category" % self.nsmap['itunes'], text="Religion & Spirituality")
+        etree.SubElement(category, "{%s}category" % self.nsmap['itunes'], text="Judaism")
+
+        etree.SubElement(item, "{%s}image" % self.nsmap['itunes'], href="https://d3t3ozftmdmh3i.cloudfront.net/staging/podcast_uploaded_nologo/38820759/38820759-1693120060958-6e29115094b23.jpg")
+
         # Duration from Drive Metadata
         vmm = f.get('videoMediaMetadata', {})
         if vmm.get('durationMillis'):
