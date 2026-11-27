@@ -65,6 +65,7 @@ podcast-platform/
 ├── .firebaserc                  # Firebase project alias (set your project ID here)
 ├── publish.sh                   # One-command Linux ingest + build + deploy
 ├── publish.ps1                  # One-command Windows 11 ingest + build + deploy
+├── cron_batch.sh                # Cron-safe batch runner (nice -n 15, 4-thread cap, flock, staged deploy)
 └── README.md
 ```
 
@@ -140,23 +141,41 @@ What happens automatically:
 
 ---
 
-## Backfilling All 145 Episodes Gradually
+## SEO Features
 
-Because CPU transcription takes ~6–12 minutes per 35-minute episode, you can backfill in safe batches without redoing work (already-processed GUIDs are skipped automatically):
+- `<html lang="he">` with automatic RTL (`dir="auto"`) for Hebrew titles, summaries, and transcripts
+- Per-page `<link rel="canonical">` and RSS `<link rel="alternate" type="application/rss+xml">`
+- Schema.org `@graph` JSON-LD injected into `<head>` during static prerendering:
+  - `PodcastEpisode` + nested `AudioObject` (with ISO-8601 durations like `PT32M59S`) + `PodcastSeries`
+  - `BreadcrumbList` navigation
+- Internal linking via **Newer / Older Episode** navigation and keyword-matched **Related Episodes**
+- Auto-generated `sitemap.xml` and `robots.txt`
+
+---
+
+## Backfilling Episodes & Daily Cron Automation
+
+Because CPU transcription takes several minutes per 35-minute episode, `--max-episodes` skips already-ingested GUIDs and processes the next `N` **new** episodes per run. Both `faster-whisper` and Ollama default to **4 CPU threads** (`--cpu-threads 4`) to prevent overheating, and every run automatically logs to `backend/ingestion.log` (rotating UTF-8, 5 MB × 3 backups).
 
 ```bash
 cd podcast-platform/backend
 
-# Run 10 episodes overnight (only processes episodes not yet in episodes-index.json)
-python3 ingest_anchor_feed.py --max-episodes 20
+# Ingest the next 5 un-processed episodes (4 CPU threads by default)
+python3 ingest_anchor_feed.py --max-episodes 5
 
-# If you want fast transcription-only without Ollama running:
-python3 ingest_anchor_feed.py --max-episodes 20 --skip-llm
+# Fast transcription-only without Ollama running:
+python3 ingest_anchor_feed.py --max-episodes 5 --skip-llm
+
+# Re-summarize any saved episodes whose summary is non-Hebrew (no re-transcription):
+python3 ingest_anchor_feed.py --resummarize-english
 ```
 
-Then build & deploy once the batch finishes:
-```bash
-cd ../frontend && npm run build && cd .. && firebase deploy --only hosting
+### Automated Daily Cron (2 Batches/Day, Deploy Once)
+`cron_batch.sh` runs under `nice -n 15` with `flock` locking and a `.pending_deploy` marker so two overnight/morning batches can run and deploy together after the second run:
+
+```cron
+0 2 * * * AUTO_DEPLOY=false /path/to/podcast-platform/cron_batch.sh >> /path/to/podcast-platform/backend/cron.log 2>&1
+0 8 * * * AUTO_DEPLOY=true /path/to/podcast-platform/cron_batch.sh >> /path/to/podcast-platform/backend/cron.log 2>&1
 ```
 
 ---

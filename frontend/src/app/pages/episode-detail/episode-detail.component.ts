@@ -4,7 +4,7 @@ import { ActivatedRoute, RouterLink } from '@angular/router';
 import { Subscription } from 'rxjs';
 import { EpisodeService } from '../../services/episode.service';
 import { SeoService } from '../../services/seo.service';
-import { Episode } from '../../models/episode.model';
+import { Episode, EpisodeIndexItem } from '../../models/episode.model';
 import { AudioPlayerComponent } from '../../components/audio-player/audio-player.component';
 
 @Component({
@@ -166,6 +166,73 @@ import { AudioPlayerComponent } from '../../components/audio-player/audio-player
           </div>
         </section>
 
+        <!-- Previous / Next Episode Navigation -->
+        @if (adjacentEpisodes().newer || adjacentEpisodes().older) {
+          <nav aria-label="Episode navigation" class="mt-10 grid grid-cols-1 sm:grid-cols-2 gap-4">
+            @if (adjacentEpisodes().newer; as newerEp) {
+              <a
+                [routerLink]="['/episode', newerEp.id]"
+                class="group p-4 rounded-xl bg-slate-900/70 border border-slate-800 hover:border-indigo-500/50 transition-all flex flex-col gap-1"
+              >
+                <span class="text-xs font-semibold text-indigo-400">← פרק חדש יותר (Newer)</span>
+                <span dir="auto" class="text-sm font-bold text-slate-100 group-hover:text-indigo-300 transition-colors line-clamp-1">
+                  {{ newerEp.title }}
+                </span>
+              </a>
+            } @else {
+              <div class="hidden sm:block"></div>
+            }
+
+            @if (adjacentEpisodes().older; as olderEp) {
+              <a
+                [routerLink]="['/episode', olderEp.id]"
+                class="group p-4 rounded-xl bg-slate-900/70 border border-slate-800 hover:border-indigo-500/50 transition-all flex flex-col gap-1 sm:text-right"
+              >
+                <span class="text-xs font-semibold text-indigo-400">פרק קודם (Older) →</span>
+                <span dir="auto" class="text-sm font-bold text-slate-100 group-hover:text-indigo-300 transition-colors line-clamp-1">
+                  {{ olderEp.title }}
+                </span>
+              </a>
+            }
+          </nav>
+        }
+
+        <!-- Related Episodes -->
+        @if (relatedEpisodes().length > 0) {
+          <section class="mt-12" aria-label="Related Episodes">
+            <h2 dir="auto" class="text-lg font-bold text-white mb-4 flex items-center gap-2">
+              <span>פרקים קשורים</span>
+              <span class="text-xs font-mono font-normal text-slate-400">(Related Episodes)</span>
+            </h2>
+            <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
+              @for (rel of relatedEpisodes(); track rel.id) {
+                <a
+                  [routerLink]="['/episode', rel.id]"
+                  class="group p-4 rounded-xl bg-slate-900/50 border border-slate-800 hover:border-indigo-500/50 transition-all flex flex-col justify-between gap-3"
+                >
+                  <div>
+                    <div class="text-[11px] text-slate-400 mb-1.5 flex items-center justify-between">
+                      <span>{{ formatDate(rel.publishedAt) }}</span>
+                      @if (rel.duration) {
+                        <span class="font-mono">{{ rel.duration }}</span>
+                      }
+                    </div>
+                    <h3 dir="auto" class="text-sm font-bold text-slate-100 group-hover:text-indigo-300 transition-colors line-clamp-2 mb-2">
+                      {{ rel.title }}
+                    </h3>
+                    <p dir="auto" class="text-xs text-slate-400 line-clamp-2 leading-relaxed">
+                      {{ rel.summary || rel.description }}
+                    </p>
+                  </div>
+                  <span class="text-xs font-semibold text-indigo-400 group-hover:text-indigo-300">
+                    האזן וקרא תמלול →
+                  </span>
+                </a>
+              }
+            </div>
+          </section>
+        }
+
         <!-- Back to Catalog -->
         <div class="mt-12 text-center">
           <a routerLink="/" class="inline-flex items-center gap-2 px-6 py-3 rounded-xl bg-slate-900 hover:bg-slate-800 text-slate-200 text-sm font-semibold border border-slate-800 transition-colors shadow-sm">
@@ -230,6 +297,42 @@ export class EpisodeDetailComponent implements OnInit, OnDestroy {
     return matches ? matches.length : 0;
   });
 
+  readonly adjacentEpisodes = computed<{ newer: EpisodeIndexItem | null; older: EpisodeIndexItem | null }>(() => {
+    const ep = this.episode();
+    const list = this.episodeService.episodes();
+    if (!ep || list.length === 0) {
+      return { newer: null, older: null };
+    }
+    const idx = list.findIndex(item => item.id === ep.id);
+    if (idx === -1) {
+      return { newer: null, older: null };
+    }
+    return {
+      newer: idx > 0 ? list[idx - 1] : null,
+      older: idx < list.length - 1 ? list[idx + 1] : null,
+    };
+  });
+
+  readonly relatedEpisodes = computed<EpisodeIndexItem[]>(() => {
+    const ep = this.episode();
+    const list = this.episodeService.episodes();
+    if (!ep || list.length <= 1) return [];
+
+    const epKeywords = new Set((ep.keywords || []).map(k => k.toLowerCase()));
+    return list
+      .filter(item => item.id !== ep.id)
+      .map(item => {
+        const overlap = (item.keywords || []).reduce(
+          (acc, k) => acc + (epKeywords.has(k.toLowerCase()) ? 1 : 0),
+          0
+        );
+        return { item, overlap };
+      })
+      .sort((a, b) => b.overlap - a.overlap)
+      .slice(0, 3)
+      .map(entry => entry.item);
+  });
+
   ngOnInit(): void {
     const initialId = this.route.snapshot.paramMap.get('id');
     void this.loadEpisode(initialId);
@@ -253,7 +356,16 @@ export class EpisodeDetailComponent implements OnInit, OnDestroy {
     }
 
     this.loading.set(true);
-    const found = await this.episodeService.getEpisodeById(id);
+    const catalogPromise =
+      this.episodeService.episodes().length === 0
+        ? this.episodeService.fetchEpisodes()
+        : Promise.resolve();
+
+    const [found] = await Promise.all([
+      this.episodeService.getEpisodeById(id),
+      catalogPromise,
+    ]);
+
     this.episode.set(found);
     this.loading.set(false);
 

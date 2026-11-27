@@ -2,7 +2,7 @@
   "hosting": {
     "site": "silance-podcast-automator",
     "public": "frontend/dist/frontend/browser",
-    "cleanUrls": true,
+    "cleanUrls": false,
     "trailingSlash": false,
     "ignore": [
       "firebase.json",

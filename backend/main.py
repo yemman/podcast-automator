@@ -74,6 +74,7 @@ DEFAULT_WHISPER_MODEL = "ivrit-ai/whisper-large-v3-turbo-ct2"
 DEFAULT_OLLAMA_MODEL = "gemma3:4b"
 DEFAULT_OLLAMA_URL = "http://localhost:11434"
 DEFAULT_SITE_URL = "https://silance-podcast-automator.web.app"
+DEFAULT_CPU_THREADS = int(os.environ.get("CPU_THREADS", "4"))
 DEFAULT_OUTPUT_DIR = os.path.abspath(
     os.path.join(os.path.dirname(__file__), "..", "frontend", "public", "data")
 )
@@ -85,6 +86,18 @@ _WHISPER_MODEL_CACHE: Dict[Tuple[str, str, str, int], Any] = {}
 def is_hebrew_text(text: str) -> bool:
     """Detects if text contains Hebrew unicode characters."""
     return any("\u0590" <= ch <= "\u05ff" for ch in (text or ""))
+
+
+def is_predominantly_hebrew(text: str, min_ratio: float = 0.6) -> bool:
+    """Checks that text contains at least 10 Hebrew letters and >= min_ratio Hebrew vs Latin letters."""
+    if not text:
+        return False
+    heb_count = sum(1 for ch in text if "\u0590" <= ch <= "\u05ff")
+    latin_count = sum(1 for ch in text if ("a" <= ch <= "z") or ("A" <= ch <= "Z"))
+    total = heb_count + latin_count
+    if heb_count < 10 or total == 0:
+        return False
+    return (heb_count / total) >= min_ratio
 
 
 def generate_doc_id(guid: str) -> str:
@@ -399,7 +412,7 @@ def transcribe_audio_local(
     Transcribes an audio file locally using faster-whisper (ivrit-ai for Hebrew).
     Groups segments into readable paragraphs with [HH:MM:SS] timestamps.
     """
-    threads = cpu_threads or min(os.cpu_count() or 4, 8)
+    threads = cpu_threads or min(os.cpu_count() or 4, DEFAULT_CPU_THREADS)
     model = _get_whisper_model(model_name, device, compute_type, threads)
 
     logger.info(f"Decoding and transcribing audio locally ({os.path.basename(audio_path)}, language={language})...")
@@ -530,10 +543,12 @@ def summarize_with_ollama(
     ollama_url: str = DEFAULT_OLLAMA_URL,
     ollama_model: str = DEFAULT_OLLAMA_MODEL,
     skip_llm: bool = False,
+    cpu_threads: Optional[int] = None,
 ) -> Dict[str, Any]:
     """
     Generates a 2-paragraph summary and SEO keywords list from the transcript via local Ollama.
-    Falls back cleanly if skip_llm is True or Ollama is unreachable.
+    Enforces Hebrew output for Hebrew episodes (with automatic retry + fallback) and falls back
+    cleanly if skip_llm is True or Ollama is unreachable.
     """
     if skip_llm:
         logger.info("Skipping local Ollama LLM step (--skip-llm enabled). Using fallback summary.")
@@ -541,13 +556,21 @@ def summarize_with_ollama(
 
     clean_desc = _strip_html(description)
     truncated_transcript = (transcript or "")[:18000]
-    lang_instruction = (
-        "Write BOTH summary paragraphs and all SEO keywords in fluent Hebrew matching the lesson."
-        if is_heb
-        else "Write BOTH summary paragraphs and SEO keywords in the spoken language of the transcript."
-    )
 
-    prompt = f"""You are an expert podcast editor and SEO specialist.
+    if is_heb:
+        lang_instruction = (
+            "CRITICAL: Write ONLY in fluent Hebrew. Do NOT write English sentences."
+        )
+        example_summary = "פסקה ראשונה בעברית...\\n\\nפסקה שנייה בעברית..."
+        example_keywords = '["מילת מפתח 1", "מילת מפתח 2"]'
+        system_msg = "You write podcast summaries and SEO keywords strictly in Hebrew JSON."
+    else:
+        lang_instruction = "Write BOTH summary paragraphs and SEO keywords in the spoken language of the transcript."
+        example_summary = "Paragraph 1...\\n\\nParagraph 2..."
+        example_keywords = '["keyword1", "keyword2"]'
+        system_msg = "You write podcast summaries and SEO keywords in valid JSON."
+
+    base_prompt = f"""You are an expert podcast editor and SEO specialist.
 Episode Title: {title}
 Episode Description: {clean_desc}
 Language Rule: {lang_instruction}
@@ -563,37 +586,65 @@ Return ONLY a valid JSON object with exactly two keys:
 
 Example format:
 {{
-  "summary": "Paragraph 1...\\n\\nParagraph 2...",
-  "keywords": ["keyword1", "keyword2"]
+  "summary": "{example_summary}",
+  "keywords": {example_keywords}
 }}
 """
 
     endpoint = f"{ollama_url.rstrip('/')}/api/generate"
-    payload = {
-        "model": ollama_model,
-        "prompt": prompt,
-        "stream": False,
-        "format": "json",
-        "options": {
-            "num_ctx": 16384,
-            "temperature": 0.2,
-        },
-    }
 
-    try:
-        logger.info(f"Generating 2-paragraph summary & SEO keywords with Ollama ({ollama_model})...")
-        response = requests.post(endpoint, json=payload, timeout=300)
-        response.raise_for_status()
-        body = response.json()
-        raw_json = body.get("response", "").strip()
-        parsed = json.loads(raw_json)
-        return validate_enrichment_output(parsed, title, transcript, description, is_heb)
-    except Exception as err:
-        logger.warning(
-            f"Ollama unavailable or returned invalid response ({err}). "
-            "Falling back to deterministic summary while preserving full transcript."
-        )
-        return _build_fallback_enrichment(title, transcript, description, is_heb)
+    for attempt in range(2):
+        prompt = base_prompt
+        if attempt == 1:
+            prompt += (
+                "\nIMPORTANT: Your previous output was in English. "
+                "Output ONLY Hebrew in 'summary' and 'keywords'."
+            )
+
+        payload = {
+            "model": ollama_model,
+            "system": system_msg,
+            "prompt": prompt,
+            "stream": False,
+            "format": "json",
+            "options": {
+                "num_ctx": 16384,
+                "temperature": 0.2,
+                "num_thread": cpu_threads or DEFAULT_CPU_THREADS,
+            },
+        }
+
+        try:
+            logger.info(
+                f"Generating 2-paragraph summary & SEO keywords with Ollama ({ollama_model}, attempt {attempt + 1}/2)..."
+            )
+            response = requests.post(endpoint, json=payload, timeout=300)
+            response.raise_for_status()
+            body = response.json()
+            raw_json = body.get("response", "").strip()
+            parsed = json.loads(raw_json)
+            result = validate_enrichment_output(parsed, title, transcript, description, is_heb)
+
+            if is_heb and not is_predominantly_hebrew(result["summary"]):
+                logger.warning(
+                    f"Ollama returned non-Hebrew summary for '{title}' on attempt {attempt + 1}/2."
+                )
+                if attempt == 0:
+                    continue
+                logger.warning(
+                    f"Second attempt for '{title}' was still non-Hebrew. Using Hebrew fallback summary."
+                )
+                return _build_fallback_enrichment(title, transcript, description, is_heb)
+
+            return result
+        except Exception as err:
+            logger.warning(
+                f"Ollama unavailable or returned invalid response ({err}). "
+                "Falling back to deterministic summary while preserving full transcript."
+            )
+            return _build_fallback_enrichment(title, transcript, description, is_heb)
+
+    return _build_fallback_enrichment(title, transcript, description, is_heb)
 
 
 def generate_mock_enrichment(title: str, description: str, is_heb: bool) -> Dict[str, Any]:
@@ -734,9 +785,10 @@ def process_rss_feed(
     skipped_count = 0
     failed_count = 0
 
-    entries_to_process = feed.entries[:max_episodes] if max_episodes > 0 else feed.entries
+    for entry in feed.entries:
+        if max_episodes > 0 and len(processed_episodes) >= max_episodes:
+            break
 
-    for entry in entries_to_process:
         guid = entry.get("id") or entry.get("guid") or entry.get("link")
         title = entry.get("title", "Untitled Episode")
         raw_description = entry.get("summary") or entry.get("description") or ""
@@ -794,6 +846,7 @@ def process_rss_feed(
                     ollama_url=ollama_url,
                     ollama_model=ollama_model,
                     skip_llm=skip_llm,
+                    cpu_threads=cpu_threads,
                 )
                 ai_data = {
                     "transcript": transcript or f"Transcript unavailable for {title}.",
@@ -868,6 +921,89 @@ def process_rss_feed(
     }
 
 
+def resummarize_existing_episodes(
+    output_dir: str = DEFAULT_OUTPUT_DIR,
+    ollama_url: str = DEFAULT_OLLAMA_URL,
+    ollama_model: str = DEFAULT_OLLAMA_MODEL,
+    only_non_hebrew: bool = True,
+    site_url: str = DEFAULT_SITE_URL,
+    cpu_threads: Optional[int] = None,
+) -> Dict[str, Any]:
+    """
+    Re-runs Ollama summarization on already-transcribed local episodes without re-transcribing audio.
+    When only_non_hebrew=True, skips episodes whose summary already passes is_predominantly_hebrew().
+    """
+    store = LocalEpisodeStore(output_dir=output_dir, site_url=site_url)
+    index = store.load_index()
+    updated_episodes = []
+    skipped_count = 0
+    failed_count = 0
+
+    for entry in index:
+        ep_id = entry.get("id")
+        if not ep_id:
+            continue
+        ep_path = os.path.join(store.episodes_dir, f"{ep_id}.json")
+        if not os.path.exists(ep_path):
+            logger.warning(f"Episode JSON missing for {ep_id}, skipping.")
+            skipped_count += 1
+            continue
+
+        try:
+            with open(ep_path, "r", encoding="utf-8") as f:
+                ep = json.load(f)
+
+            title = ep.get("title", "Untitled Episode")
+            current_summary = ep.get("summary", "")
+            transcript = ep.get("transcript", "")
+            description = ep.get("description", "")
+
+            if only_non_hebrew and is_predominantly_hebrew(current_summary):
+                logger.info(f"Episode '{title}' ({ep_id}) already has a Hebrew summary. Skipping.")
+                skipped_count += 1
+                continue
+
+            if not transcript:
+                logger.warning(f"Episode '{title}' ({ep_id}) has no saved transcript. Skipping.")
+                skipped_count += 1
+                continue
+
+            logger.info(f"Re-summarizing episode '{title}' ({ep_id}) in Hebrew...")
+            ai_data = summarize_with_ollama(
+                transcript=transcript,
+                title=title,
+                description=description,
+                is_heb=True,
+                ollama_url=ollama_url,
+                ollama_model=ollama_model,
+                skip_llm=False,
+                cpu_threads=cpu_threads,
+            )
+            ep["summary"] = ai_data["summary"]
+            if ai_data.get("keywords"):
+                ep["keywords"] = ai_data["keywords"]
+            store.save_episode(ep)
+
+            updated_episodes.append({
+                "id": ep_id,
+                "title": title,
+                "summary_length": len(ep["summary"]),
+                "is_hebrew": is_predominantly_hebrew(ep["summary"]),
+            })
+        except Exception as err:
+            logger.exception(f"Failed re-summarizing episode {ep_id}: {err}")
+            failed_count += 1
+
+    return {
+        "status": "success",
+        "mode": "resummarize",
+        "output_dir": store.output_dir,
+        "episodes_updated": updated_episodes,
+        "episodes_skipped": skipped_count,
+        "episodes_failed": failed_count,
+    }
+
+
 def cli_main():
     """Command Line Interface for local podcast ingestion."""
     parser = argparse.ArgumentParser(description="100% Local Podcast RSS Ingestion Pipeline (faster-whisper + Ollama)")
@@ -876,10 +1012,11 @@ def cli_main():
     parser.add_argument("--force", action="store_true", help="Force reprocess already ingested episodes")
     parser.add_argument("--mock", action="store_true", help="Use mock transcription & summary for fast dry-run testing")
     parser.add_argument("--skip-llm", action="store_true", help="Skip Ollama summarization and use fallback description summary")
+    parser.add_argument("--resummarize-english", action="store_true", help="Re-summarize existing episodes that currently have non-Hebrew summaries")
     parser.add_argument("--whisper-model", type=str, default=os.environ.get("WHISPER_MODEL", DEFAULT_WHISPER_MODEL), help="faster-whisper model name or path")
     parser.add_argument("--whisper-device", type=str, default=os.environ.get("WHISPER_DEVICE", "cpu"), help="Device: cpu or cuda")
     parser.add_argument("--compute-type", type=str, default=os.environ.get("WHISPER_COMPUTE_TYPE", "int8"), help="Compute type: int8, float16, float32")
-    parser.add_argument("--cpu-threads", type=int, default=None, help="CPU threads for faster-whisper")
+    parser.add_argument("--cpu-threads", type=int, default=DEFAULT_CPU_THREADS, help="CPU threads for faster-whisper and Ollama")
     parser.add_argument("--ollama-model", type=str, default=os.environ.get("OLLAMA_MODEL", DEFAULT_OLLAMA_MODEL), help="Ollama model tag")
     parser.add_argument("--ollama-url", type=str, default=os.environ.get("OLLAMA_URL", DEFAULT_OLLAMA_URL), help="Ollama server base URL")
     parser.add_argument("--output-dir", type=str, default=os.environ.get("PODCAST_DATA_DIR", DEFAULT_OUTPUT_DIR), help="Directory for episodes-index.json and episodes/")
@@ -888,6 +1025,18 @@ def cli_main():
     args = parser.parse_args()
 
     configure_logging(args.log_file)
+
+    if args.resummarize_english:
+        res = resummarize_existing_episodes(
+            output_dir=args.output_dir,
+            ollama_url=args.ollama_url,
+            ollama_model=args.ollama_model,
+            only_non_hebrew=True,
+            site_url=args.site_url,
+            cpu_threads=args.cpu_threads,
+        )
+        print(json.dumps(res, indent=2, ensure_ascii=False))
+        return
 
     res = process_rss_feed(
         feed_url=args.feed_url,

@@ -16,6 +16,7 @@ from main import (
     generate_doc_id,
     find_audio_enclosure,
     validate_enrichment_output,
+    is_predominantly_hebrew,
     summarize_with_ollama,
     decode_audio_compat,
     configure_logging,
@@ -133,7 +134,7 @@ class TestLocalRssIngestionPipeline(unittest.TestCase):
         mock_resp.raise_for_status.return_value = None
         mock_resp.json.return_value = {
             "response": json.dumps({
-                "summary": "סיכום פסקה ראשונה.\n\nסיכום פסקה שנייה.",
+                "summary": "סיכום פסקה ראשונה בעברית מלאה.\n\nסיכום פסקה שנייה בעברית מלאה.",
                 "keywords": ["חפץ חיים", "לשון הרע", "שמירת הלשון"],
             })
         }
@@ -145,8 +146,46 @@ class TestLocalRssIngestionPipeline(unittest.TestCase):
             description="תיאור",
             is_heb=True,
         )
-        self.assertEqual(res["summary"], "סיכום פסקה ראשונה.\n\nסיכום פסקה שנייה.")
+        self.assertEqual(res["summary"], "סיכום פסקה ראשונה בעברית מלאה.\n\nסיכום פסקה שנייה בעברית מלאה.")
         self.assertEqual(res["keywords"], ["חפץ חיים", "לשון הרע", "שמירת הלשון"])
+        self.assertEqual(mock_post.call_args.kwargs["json"]["options"]["num_thread"], 4)
+
+        # Retries when first attempt returns English and succeeds on Hebrew second attempt
+        eng_resp = MagicMock()
+        eng_resp.raise_for_status.return_value = None
+        eng_resp.json.return_value = {
+            "response": json.dumps({
+                "summary": "This episode delves into speech laws.\n\nSecond paragraph in English.",
+                "keywords": ["חפץ חיים"],
+            })
+        }
+        heb_resp = MagicMock()
+        heb_resp.raise_for_status.return_value = None
+        heb_resp.json.return_value = {
+            "response": json.dumps({
+                "summary": "הפרק עוסק בשמירת הלשון ובהלכות דיבור.\n\nבחלקו השני מוסברים עיקרי העבודה המוסרית.",
+                "keywords": ["שמירת הלשון", "מוסר"],
+            })
+        }
+        mock_post.side_effect = [eng_resp, heb_resp]
+        retried_res = summarize_with_ollama(
+            transcript="[00:00:01] שיעור חפץ חיים",
+            title="פרק א",
+            description="תיאור",
+            is_heb=True,
+        )
+        self.assertTrue(is_predominantly_hebrew(retried_res["summary"]))
+        self.assertIn("שמירת הלשון", retried_res["summary"])
+
+        # Falls back to Hebrew deterministic summary if both attempts are English
+        mock_post.side_effect = [eng_resp, eng_resp]
+        eng_fallback = summarize_with_ollama(
+            transcript="[00:00:01] שיעור חפץ חיים",
+            title="פרק א",
+            description="תיאור",
+            is_heb=True,
+        )
+        self.assertTrue(is_predominantly_hebrew(eng_fallback["summary"]))
 
         # Connection failure gracefully falls back instead of crashing
         mock_post.side_effect = requests.ConnectionError("Ollama not running")
@@ -158,6 +197,11 @@ class TestLocalRssIngestionPipeline(unittest.TestCase):
         )
         self.assertIn("\n\n", fallback_res["summary"])
         self.assertGreater(len(fallback_res["keywords"]), 0)
+
+    def test_is_predominantly_hebrew(self):
+        self.assertTrue(is_predominantly_hebrew("בפרק זה אנו לומדים הלכות שמירת הלשון מתוך הספר חפץ חיים."))
+        self.assertFalse(is_predominantly_hebrew("This episode delves into the critical concept of speech."))
+        self.assertFalse(is_predominantly_hebrew(""))
 
     @patch("main.download_audio_file")
     def test_process_rss_feed_end_to_end(self, mock_download):
@@ -244,6 +288,48 @@ class TestLocalRssIngestionPipeline(unittest.TestCase):
                 self.assertIn("בדיקת לוג עברית - episode ingested", contents)
             finally:
                 configure_logging(DEFAULT_LOG_FILE)
+
+    @patch("main.download_audio_file")
+    def test_max_episodes_skips_existing_and_processes_next_batch(self, mock_download):
+        mock_download.return_value = 1048576
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            data_dir = os.path.join(tmpdir, "public", "data")
+            feed_url = f"file://{os.path.abspath(self.sample_feed_path)}"
+
+            batch1 = process_rss_feed(
+                feed_url=feed_url,
+                max_episodes=1,
+                force_reprocess=False,
+                output_dir=data_dir,
+                mock_ai=True,
+            )
+            self.assertEqual(len(batch1["episodes_processed"]), 1)
+            self.assertEqual(batch1["episodes_skipped"], 0)
+
+            batch2 = process_rss_feed(
+                feed_url=feed_url,
+                max_episodes=1,
+                force_reprocess=False,
+                output_dir=data_dir,
+                mock_ai=True,
+            )
+            self.assertEqual(len(batch2["episodes_processed"]), 1)
+            self.assertEqual(batch2["episodes_skipped"], 1)
+            self.assertNotEqual(
+                batch1["episodes_processed"][0]["guid"],
+                batch2["episodes_processed"][0]["guid"],
+            )
+
+            batch3 = process_rss_feed(
+                feed_url=feed_url,
+                max_episodes=1,
+                force_reprocess=False,
+                output_dir=data_dir,
+                mock_ai=True,
+            )
+            self.assertEqual(len(batch3["episodes_processed"]), 0)
+            self.assertEqual(batch3["episodes_skipped"], 2)
 
 
 if __name__ == "__main__":
