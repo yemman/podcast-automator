@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0" xmlns:itunes="http://www.itunes.com/dtds/podcast-1.0.dtd" xmlns:content="http://purl.org/rss/1.0/modules/content/">
+  <channel>
+    <title>Tech Horizons &amp; Cloud Architectures</title>
+    <link>https://podcast-platform.app</link>
+    <language>en-us</language>
+    <copyright>© 2026 Tech Horizons Media</copyright>
+    <description>Exploring cloud-native architectures, AI pipelines, and modern web delivery.</description>
+    <itunes:author>Tech Horizons Team</itunes:author>
+    <itunes:image href="https://images.unsplash.com/photo-1590602847861-f357a9332bbc?auto=format&amp;fit=crop&amp;w=800&amp;q=80"/>
+
+    <item>
+      <title>Building Scalable Event-Driven Audio Pipelines with GCP Gen 2</title>
+      <guid isPermaLink="false">guid-episode-001-gcp-gen2</guid>
+      <pubDate>Wed, 23 Sep 2026 12:00:00 GMT</pubDate>
+      <description>An in-depth guide on handling automated podcast RSS ingestion using GCP Cloud Functions Gen 2, Eventarc, and Gemini API audio transcription.</description>
+      <enclosure url="https://storage.googleapis.com/gtv-videos-bucket/sample/TearsOfSteel.mp4" length="14205800" type="audio/mp4"/>
+      <itunes:duration>04:35</itunes:duration>
+      <itunes:author>Tech Horizons Team</itunes:author>
+    </item>
+
+    <item>
+      <title>Gemini Multimodal Reasoning: Zero-Shot Audio to Verbatim Transcripts</title>
+      <guid isPermaLink="false">guid-episode-002-gemini-audio</guid>
+      <pubDate>Mon, 21 Sep 2026 15:30:00 GMT</pubDate>
+      <description>Learn how Gemini natively ingests raw audio frequencies to generate verbatim transcripts, structured summaries, and high-impact SEO tags.</description>
+      <enclosure url="https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4" length="10842000" type="audio/mp4"/>
+      <itunes:duration>02:45</itunes:duration>
+      <itunes:author>Tech Horizons Team</itunes:author>
+    </item>
+  </channel>
+</rss>

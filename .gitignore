@@ -1,0 +1,10 @@
+*.log
+*.log.*
+__pycache__/
+*.pyc
+.venv/
+venv/
+.firebase/
+node_modules/
+dist/
+.angular/

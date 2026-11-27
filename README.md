@@ -1,141 +1,177 @@
-# Podcast-to-Spotify Automator: A Serverless Data Pipeline
+# PodStream.ai — $0/Month Local AI + Angular SSG Podcast Platform
 
-This project is a cloud-native, automated data pipeline designed to synchronize audio recordings from Google Drive to a Spotify-compatible RSS feed hosted on GitHub. It is built with a focus on **Data Engineering best practices**, utilizing modern serverless architecture and Generative AI for metadata enrichment.
+A 100% free-to-operate, SEO-optimized podcast platform that runs **all AI transcription and summarization locally on your own computer** (no Gemini API, no Cloud Functions, no Firestore, no Cloud Run) and hosts the pre-rendered static site on **Firebase Hosting's Spark (Free) plan**.
 
----
-
-## 🏗️ Architecture & Data Engineering Logic
-
-As a pipeline built by a Senior Data Engineer, this project moves beyond simple "scripting" by implementing a robust **Data Lifecycle Management** strategy:
-
-### 1. The "Medallion" Logic (Bronze to Silver)
-
-The pipeline treats Google Drive as a data lake with a structured workflow:
-
-* **Landing Zone (Bronze):** New raw audio files (`.mp3`, `.m4a`, `.wav`) are dropped into a "Source" folder.
-* **Processing:** The system extracts duration metadata, generates AI-driven summaries, and updates the GitHub-hosted XML.
-* **Archive (Silver):** Once successfully committed to the feed, files are moved to a "Processed" folder to ensure **Idempotency** (no duplicate processing).
-
-### 2. Generative AI Enrichment
-
-Leveraging **Gemini 1.5 Flash**, the pipeline "listens" to each audio file to generate a 2-3 sentence Hebrew description. This transforms a simple file sync into an intelligent content management system.
-
-### 3. Observability & Cost Monitoring
-
-* **Log-Level Metrics:** Detailed logging tracks duration, file sizes, and successful GitHub commits.
-* **Unit Economics:** The code includes an integrated cost calculator that logs the estimated USD cost of each AI inference run ($0.00002/sec) to GCP Cloud Logging.
+Configured for: **[מי האיש החפץ חיים](https://anchor.fm/s/e7fc5d7c/podcast/rss)** (Rabbi Yannay's lessons on *Sefer Chafetz Chaim*).
 
 ---
 
-## 🛠️ Tech Stack
+## Architecture Overview ($0/Month Forever)
 
-* **Runtime:** Python 3.14 (utilizing the experimental JIT for performance).
-* **Environment:** Dockerized (slim image) deployed on **Google Cloud Run**.
-* **Secrets:** Secure cross-project access via **GCP Secret Manager**.
-* **API Integrations:** * **Google Drive API v3** (Metadata & File Management).
-* **Vertex AI / Gemini API** (Audio Summarization).
-* **GitHub REST API** (Automated XML commits).
+```mermaid
+flowchart LR
+    RSS["Anchor.fm RSS Feed<br/>(Audio hosted on Anchor CDN)"] --> Ingest["Local Python Script<br/>ingest_anchor_feed.py"]
+    Ingest --> Dedupe{"GUID already in<br/>episodes-index.json?"}
+    Dedupe -- Yes --> Skip["Skip"]
+    Dedupe -- No --> Whisper["faster-whisper (Local CPU)<br/>ivrit-ai/whisper-large-v3-turbo-ct2"]
+    Whisper --> Ollama["Ollama (Local LLM)<br/>gemma3:4b (2-para summary + SEO tags)"]
+    Ollama --> JSON["Static JSON & SEO Files<br/>frontend/public/data/*.json + sitemap.xml"]
+    JSON --> SSG["Angular SSG Build (ng build)<br/>Prerenders / & every /episode/:id<br/>with JSON-LD in &lt;head&gt;"]
+    SSG --> Firebase["Firebase Hosting (Spark Free Tier)<br/>Global CDN + Free SSL + Custom Domain"]
+```
 
-
-* **XML Engine:** `lxml` for maintaining strict RSS/iTunes/Anchor.fm namespaces and Hebrew CDATA integrity.
+### Why This Costs Strictly $0/Month
+- **Transcription:** Runs locally via [`faster-whisper`](https://github.com/SYSTRAN/faster-whisper) using the Hebrew-tuned [`ivrit-ai/whisper-large-v3-turbo-ct2`](https://huggingface.co/ivrit-ai/whisper-large-v3-turbo-ct2) model.
+- **Summaries & SEO Keywords:** Runs locally via [Ollama](https://ollama.com/) (`gemma3:4b`), with an automatic `--skip-llm` / offline fallback so transcription always succeeds even if Ollama isn't running.
+- **Database:** Static JSON files (`episodes-index.json` + per-episode `episodes/<id>.json`) committed right in your repo.
+- **Hosting:** Static Angular SSG build deployed to **Firebase Hosting Spark (Free) plan** (10 GB storage, 360 MB/day transfer, no credit card required).
+- **Audio Streaming:** Served directly from Anchor/CloudFront CDN via standard HTML5 `<audio>`.
 
 ---
 
-## 🚀 Key Features
+## System Requirements
 
-* **Dynamic Extension Handling:** Automatically detects audio containers (m4a/mp3) and sets correct `enclosure` mime-types.
-* **Serverless Scalability:** Scales to zero when not in use, triggered by a Cloud Scheduler (Cron) or Webhook.
-* **Hebrew Language Support:** Fully optimized for RTL content and Hebrew character encoding in RSS readers.
-* **Security First:** Uses Application Default Credentials (ADC) and IAM roles instead of hardcoded keys.
+- **OS:** Linux, macOS, or Windows 11 (`publish.sh` for bash, `publish.ps1` for PowerShell)
+- **CPU / GPU:** Modern multi-core CPU (using `--whisper-device cpu --compute-type int8`), or an NVIDIA CUDA GPU (`--whisper-device cuda --compute-type float16`)
+- **RAM:** 8+ GB recommended when running `faster-whisper` (`ivrit-ai/whisper-large-v3-turbo-ct2`) alongside Ollama (`gemma3:4b`)
+- **Runtime:** Python 3.10+ and Node.js 20+ (no separate system `ffmpeg` required; PyAV bundles FFmpeg libraries)
 
 ---
 
-## 🔧 Infrastructure Setup
+## Monorepo Layout
 
-### Environment Variables
-
-| Key | Description |
-| --- | --- |
-| `FOLDER_ID` | Landing folder for new recordings. |
-| `PROCESSED_FOLDER_ID` | Archive folder for successfully synced files. |
-| `GEMINI_API_KEY` | Vertex AI / Google AI Studio key. |
-| `GITHUB_TOKEN` | Personal Access Token with repo scope. |
-
-### Deployment
-
-The project is deployed via a Docker container to ensure environment parity between local development and GCP.
-
-```bash
-docker build -t podcast-automator .
-gcloud run deploy podcast-service --image gcr.io/[PROJECT_ID]/podcast-automator
-
+```text
+podcast-platform/
+├── backend/
+│   ├── main.py                  # Local RSS parser, faster-whisper, Ollama & LocalEpisodeStore
+│   ├── ingest_anchor_feed.py    # CLI entrypoint for the Anchor.fm feed
+│   ├── requirements.txt         # Local Python dependencies (no cloud SDKs)
+│   ├── test_ingestion.py        # Unit & integration tests
+│   └── sample_feed.xml          # Offline sample RSS XML for tests
+├── frontend/
+│   ├── public/
+│   │   ├── data/
+│   │   │   ├── episodes-index.json # Catalog index (without full transcripts)
+│   │   │   └── episodes/*.json     # Full episode JSON (with verbatim transcript)
+│   │   ├── sitemap.xml          # Auto-generated XML sitemap
+│   │   └── robots.txt           # Auto-generated robots.txt
+│   ├── src/app/
+│   │   ├── components/          # header, footer, audio-player (Signals)
+│   │   ├── pages/               # home, episode-detail (/episode/:id)
+│   │   ├── services/            # episode.service.ts (Signals), seo.service.ts (JSON-LD)
+│   │   └── app.routes.server.ts # Prerenders / and all /episode/:id routes at build time
+│   └── angular.json             # Configured with outputMode: "static"
+├── firebase.json                # Firebase Hosting static config & cache headers
+├── .firebaserc                  # Firebase project alias (set your project ID here)
+├── publish.sh                   # One-command Linux ingest + build + deploy
+├── publish.ps1                  # One-command Windows 11 ingest + build + deploy
+└── README.md
 ```
 
 ---
 
-## 👨‍💻 Author
+## One-Time Setup
 
-**Yannay** *Senior Data Engineer*
+### 1. Python Dependencies (`faster-whisper`)
+`faster-whisper` bundles PyAV/FFmpeg libraries, so you don't even need a separate system `ffmpeg` install.
 
----
-
-## ⚠️ Troubleshooting: IAM & Permissions
-
-In a cross-project serverless environment, 90% of deployment failures are identity-related. Below are the most common friction points for this pipeline and how to resolve them.
-
----
-
-### 1. Error: `403 Forbidden` on Google Drive
-
-**Symptom:** The script can see the files but fails when trying to move them to the `PROCESSED_FOLDER_ID`.
-
-* **The Cause:** Moving a file in Drive requires the `files.update` permission, which is part of the **Editor** role.
-* **The Fix:** Ensure the Service Account running your Cloud Run/Function has the **Editor** role (or a custom role with `https://www.googleapis.com/auth/drive`) on **both** the Source and Processed folders.
-* *Note:* Sharing the folder with the Service Account's email address in the Google Drive UI is often the fastest way to grant this.
-
-
-
-### 2. Error: `Secret Manager` Access Denied
-
-**Symptom:** `google.api_core.exceptions.PermissionDenied: 403 Permission 'secretmanager.versions.access' denied`.
-
-* **The Cause:** This usually happens when the secret is in a different project and the "bridge" hasn't been built.
-* **The Fix:** 1.  Get the **Service Account email** from the "Podcast" project.
-2.  Go to the **Secret Manager** in the "Security" project.
-3.  Select the specific secret -> **Permissions** -> **Add Principal**.
-4.  Assign the role: `roles/secretmanager.secretAccessor`.
-
-### 3. Error: `Default Credentials` Not Found
-
-**Symptom:** `google.auth.exceptions.DefaultCredentialsError`.
-
-* **The Cause:** This typically happens during **local development** when the environment doesn't have access to your GCP identity.
-* **The Fix:** Run the following command on your local machine to re-authenticate:
+**Linux:**
 ```bash
-gcloud auth application-default login
-
+cd podcast-platform/backend
+pip3 install --user --break-system-packages -r requirements.txt
+# (Or inside a virtualenv: python3 -m venv .venv && source .venv/bin/activate && pip install -r requirements.txt)
 ```
 
+**Windows 11 (PowerShell):**
+```powershell
+cd podcast-platform\backend
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+pip install -r requirements.txt
+```
 
-This creates a local JSON file that the `google-auth` library will automatically detect.
+### 2. Ollama (Local Summarization & Keywords)
+1. Install Ollama from [https://ollama.com/download](https://ollama.com/download) (available for both Linux and Windows 11).
+2. Pull the lightweight Hebrew-capable model (fits comfortably in ~4 GB RAM):
+   ```bash
+   ollama pull gemma3:4b
+   ```
+   *(Optional on systems with 16+ GB RAM: `ollama pull qwen2.5:7b` and pass `--ollama-model qwen2.5:7b`.)*
 
-### 4. Error: Gemini API `Quota Exceeded` or `API Not Enabled`
-
-**Symptom:** `429 Too Many Requests` or `403 Generative Language API has not been used...`.
-
-* **The Cause:** The `Generative Language API` must be enabled in the project **associated with the API Key or Service Account** you are using.
-* **The Fix:**
-1. Go to the [GCP Console API Library](https://console.cloud.google.com/apis/library).
-2. Search for **Generative Language API**.
-3. Ensure it is **Enabled** in the billing project.
-
-
+### 3. Firebase CLI & Free Spark Project
+1. Install the Firebase CLI (requires Node.js):
+   ```bash
+   npm install -g firebase-tools
+   ```
+2. Create a free Firebase project in the [Firebase Console](https://console.firebase.google.com/) (stays on the **Spark Free** plan—no billing account needed).
+3. Authenticate and bind your project ID inside `podcast-platform/`:
+   ```bash
+   cd podcast-platform
+   firebase login
+   firebase use --add
+   ```
+   Or replace `YOUR_FIREBASE_PROJECT_ID` in `.firebaserc` and update `siteUrl` in `frontend/src/environments/environment.prod.ts` (and `--site-url`) to your `https://<your-project>.web.app` domain.
 
 ---
 
-### 🛡️ Best Practice: The "Principle of Least Privilege"
+## Weekly Workflow (One Command)
 
-Instead of granting `roles/owner` or `roles/editor` at the project level, always bind roles to the specific resource:
+Whenever you publish a new Monday lesson on Anchor:
 
-* Grant `Secret Accessor` on the **Secret** itself.
-* Grant `Drive Editor` on the **Folder** itself.
+**Linux:**
+```bash
+cd podcast-platform
+chmod +x publish.sh
+./publish.sh --max-episodes 3
+```
+
+**Windows 11 (PowerShell):**
+```powershell
+cd podcast-platform
+.\publish.ps1 -MaxEpisodes 3
+```
+
+What happens automatically:
+1. Checks `https://anchor.fm/s/e7fc5d7c/podcast/rss` and skips episodes already in `episodes-index.json`.
+2. Downloads new `.m4a` audio, transcribes Hebrew locally via `ivrit-ai/whisper-large-v3-turbo-ct2`, and generates a 2-paragraph summary + SEO keywords via Ollama.
+3. Updates `episodes-index.json`, `episodes/<id>.json`, `sitemap.xml`, and `robots.txt`.
+4. Runs `npm run build` in `frontend/`, statically pre-rendering `/` and every `/episode/:id` route with `PodcastEpisode` + `AudioObject` JSON-LD baked into `<head>`.
+5. Deploys `frontend/dist/frontend/browser` to Firebase Hosting.
+
+---
+
+## Backfilling All 145 Episodes Gradually
+
+Because CPU transcription takes ~6–12 minutes per 35-minute episode, you can backfill in safe batches without redoing work (already-processed GUIDs are skipped automatically):
+
+```bash
+cd podcast-platform/backend
+
+# Run 10 episodes overnight (only processes episodes not yet in episodes-index.json)
+python3 ingest_anchor_feed.py --max-episodes 20
+
+# If you want fast transcription-only without Ollama running:
+python3 ingest_anchor_feed.py --max-episodes 20 --skip-llm
+```
+
+Then build & deploy once the batch finishes:
+```bash
+cd ../frontend && npm run build && cd .. && firebase deploy --only hosting
+```
+
+---
+
+## Local Testing & Verification
+
+```bash
+# 1. Backend unit tests
+cd podcast-platform/backend
+python3 test_ingestion.py
+
+# 2. Fast offline dry run against live Anchor RSS into a temp folder
+python3 ingest_anchor_feed.py --max-episodes 1 --mock --output-dir /tmp/test_data
+
+# 3. Build static Angular SSG site locally
+cd ../frontend
+npx ng build
+```

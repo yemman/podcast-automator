@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://silance-podcast-automator.web.app/sitemap.xml
